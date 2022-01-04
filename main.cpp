@@ -1,8 +1,9 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <time.h>
 using namespace std;
-#define N 32
+#define N 8
 
 //一个链表存放一个子句，每个节点存放一个变量，头节点存放有变量个数
 typedef struct Node//数据节点
@@ -16,8 +17,8 @@ typedef struct//用一个邻接表来存放CNF文件数据
     Node ** tP;//创建一个指向数组的指针，该数组中存放的是指向链表头的指针
     int varNum = 0;
     int claNum = 0;
-    //创建一个指向数组的指针，该数组中存放的是指向变量的真假赋值，1表示真，-1表示假，0表示未赋值
-    int * varArrP;
+    int * varArrP;//创建一个指向数组的指针，该数组中存放的是指向变量的真假赋值，1表示真，-1表示假，0表示未赋值
+    int * varIn2CNFFre;//创建一个指向数组的指针，该数组中存放的是每个变量在长度为2的子句中的出现次数
 }CnfData;
 
 int cnt = 0;//记录子句数量
@@ -155,8 +156,12 @@ CnfData* LoadCnfData(string fileName)//用邻接表来存放CNF文件中的数�
             cnfData->claNum = stoi(buf.substr(space1+1,space2-space1-1));
             cnfData->tP = new Node * [cnfData->claNum];//创建数组
             cnfData->varArrP = new int[cnfData->varNum+1];//创建变量的真假赋值数组，该数组首位空出
+            cnfData->varIn2CNFFre = new int[cnfData->varNum+1];//创建变量的2CNF出现次数数组，该数组首位空出
             for(int i=0;i<cnfData->varNum+1;i++)
+            {
                 cnfData->varArrP[i] = 0;
+                cnfData->varIn2CNFFre[i] = 0;
+            }
             while(cnt<=cnfData->claNum)//子句没有全部读完前循环
             {
                 cnfData->tP[cnt-1] = new Node;//为每条子句创建链表头节点
@@ -183,6 +188,17 @@ CnfData* LoadCnfData(string fileName)//用邻接表来存放CNF文件中的数�
                     start = end+1;
                 }
                 cnfData->tP[cnt-1]->val = varSize;//把这个子句的变量数读写入头节点
+                if(varSize==2)//在2CNF中出现的变量对应的varIn2CNFFre[i]值++
+                {
+                    int var;
+                    Node * frePNode = cnfData->tP[cnt-1];//工作指针指向当前子句的头节点
+                    while(frePNode->next!=NULL)
+                    {
+                        var = frePNode->next->val;
+                        cnfData->varIn2CNFFre[(var>0)?var:-var]++; 
+                        frePNode = frePNode->next;
+                    }     
+                }
                 cnt++;
             }     
         }
@@ -233,7 +249,7 @@ void UnitPropagate(CnfData *data,int unitCla)//单元传播
         {
             if(pNode->next->val==unitCla)//找某子句是否有同样的文字
             {
-                data->tP[i]->val = -1;//先标记，等下一起整合
+                data->tP[i]->val = -1;//先标记删除，等下一起整合
                 data->tP[i]->next = NULL;
                 newClaNum--;
                 break;
@@ -289,8 +305,6 @@ bool ExistEmptySet(CnfData *data)//检查是否存在空子句
                 cout<<pNode->next->val;
                 pNode = pNode->next;
             }
-            cout<<endl;
-
             return true;
         }
     }
@@ -299,9 +313,22 @@ bool ExistEmptySet(CnfData *data)//检查是否存在空子句
 
 int PickBranchVar(CnfData *data)//选择一个变量进行分裂
 {
-    for(int i=1;i<=data->varNum;i++)//这里就简单地挑第一个未被赋值的变量
-        if(data->varArrP[i]==0)
-            return i;
+    //优先选择在2CNF中出现次数最多的变量进行分裂
+    int maxVar = 1;//初始假设变量1是出现次数最多的，次数为1
+    int max = 1;
+    for(int i=1;i<=data->varNum;i++)
+    {
+        if(data->varIn2CNFFre[i]>max)
+        {
+            max = data->varIn2CNFFre[i];
+            maxVar = i;
+        }
+    }
+    return maxVar;
+
+    // for(int i=1;i<=data->varNum;i++)//这里就简单地挑第一个未被赋值的变量
+    //     if(data->varArrP[i]==0)
+    //         return i;
 }
 
 CnfData *AddUnitCla(CnfData *data,int var)//在一组子句中加入一个新的单子句
@@ -310,8 +337,9 @@ CnfData *AddUnitCla(CnfData *data,int var)//在一组子句中加入一个新的
     newData->claNum = data->claNum + 1;//多加一条子句
     newData->varNum = data->varNum;
     newData->tP = new Node * [newData->claNum];
-    newData->varArrP = new int[newData->varNum];
-    for(int i=0,j=0;i<data->claNum;i++,j++)//先把原来的数据拷贝进来
+    newData->varArrP = new int[newData->varNum+1];
+    newData->varIn2CNFFre = new int[newData->varNum+1];
+    for(int i=0,j=0;i<data->claNum;i++,j++)//先处理tp，把原来的数据拷贝进来
     {
         //i和j分别指向旧数据和新数据当前要处理的是第几条子句
         Node *oldPNode = data->tP[i], *newPNode;
@@ -341,9 +369,12 @@ CnfData *AddUnitCla(CnfData *data,int var)//在一组子句中加入一个新的
     newData->tP[data->claNum]->next = new Node;
     newData->tP[data->claNum]->next->val = var;
     newData->tP[data->claNum]->next->next = NULL;
-    //然后处理真假值表
-    for(int i=0;i<=data->varNum;i++)//先复制
+    //然后处理真假值表和2CNF频率表
+    for(int i=0;i<=data->varNum;i++)//复制
+    {
         newData->varArrP[i] = data->varArrP[i];
+        newData->varIn2CNFFre[i] = data->varIn2CNFFre[i];
+    }
 
     return newData;
 }
@@ -367,6 +398,26 @@ void printOneSol(int *solP)//输出一个解
     cout<<endl;
 }
 
+void UpdateFre(CnfData *data)//对varIn2CNFFre数据进行更新
+{
+    for(int i = 1;i<=data->varNum;i++)//先清零
+        data->varIn2CNFFre[i] = 0;
+    for(int i = 0;i<data->claNum;i++)//逐条处理每个子句
+    {
+        if(data->tP[i]->val==2)
+        {
+            int var;
+            Node * frePNode = data->tP[i];//工作指针指向当前子句的头节点
+            while(frePNode->next!=NULL)
+            {
+                var = frePNode->next->val;
+                data->varIn2CNFFre[(var>0)?var:-var]++; 
+                frePNode = frePNode->next;
+            }
+        }
+    }
+}
+
 bool DPLLSolver(CnfData *data,int *solP)//基于DPLL的求解器
 { 
     while(1)//找单子句，进行单元传播，找不到就进行分裂
@@ -375,6 +426,7 @@ bool DPLLSolver(CnfData *data,int *solP)//基于DPLL的求解器
         if(SearchUnit(data,unitCla))//找单子句
         {
             UnitPropagate(data,unitCla);//进行单元传播
+
             if(SetIsEmpty(data))
             {
                 saveSol(data,solP);//说明到这里是可满足的，把当前变量的真假赋值保存下来
@@ -385,6 +437,9 @@ bool DPLLSolver(CnfData *data,int *solP)//基于DPLL的求解器
         }
         else//找不到就进行分裂
         {
+
+            UpdateFre(data);//选择分支变量之前先更新2CNF频率
+
             int branchVar = PickBranchVar(data);
             return( DPLLSolver(AddUnitCla(data,branchVar),solP) || DPLLSolver(AddUnitCla(data,-branchVar),solP) );
         }
@@ -394,15 +449,18 @@ bool DPLLSolver(CnfData *data,int *solP)//基于DPLL的求解器
 int main()
 {
     CreateNQueensFile(N);
-    
+    double dur;//测量DPLL的时间
+    clock_t start,end;
+
     CnfData *data = LoadCnfData(to_string(N)+"-Queen.cnf");//先读取CNF文件数据
     int *solP = new int[data->varNum+1];//用一个数组来存放变量的赋值
     solP[0] = data->varNum;//新数组首位同样不放变量数据，这里用来保存变量个数
     ofstream ofs(to_string(N)+"-out.txt",ios::out);//把结果保存到文件中
+    start = clock();
     if(DPLLSolver(data,solP))
     {
-        cout<<"SAT"<<endl;
-        printOneSol(solP);
+        // cout<<"SAT"<<endl;
+        // printOneSol(solP);
         ofs<<"SAT"<<endl;
         for(int i=1;i<=solP[0];i++)
         {
@@ -416,12 +474,14 @@ int main()
     }
     else
     {
-        cout<<"UNSAT"<<endl;
+        // cout<<"UNSAT"<<endl;
         ofs<<"UNSAT"<<endl;
     }
+    end = clock();
+    dur = (double)(end - start);
     ofs.close();
-
     Display(N);
+    cout<<"DPLL耗时: "<<dur/CLOCKS_PER_SEC<<"s"<<endl;
     // cout<<"p cnf "<<data->varNum<<" "<<data->claNum<<endl;
     // for(int i=0;i<data->claNum;i++)
     // {
