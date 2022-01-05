@@ -3,7 +3,7 @@
 #include <string>
 #include <time.h>
 using namespace std;
-#define N 8
+#define N 16
 
 //一个链表存放一个子句，每个节点存放一个变量，头节点存放有变量个数
 typedef struct Node//数据节点
@@ -148,6 +148,8 @@ CnfData* LoadCnfData(string fileName)//用邻接表来存放CNF文件中的数�
         int cnt = 1;//标记记录到了第几条子句
         string buf;
         getline(ifs,buf);
+        while(buf[0]!='p')//如果没有读到信息行一直读
+            getline(ifs,buf);
         if(buf[0]=='p')//如果读到信息行
         {
             int space1 = buf.find(' ',6);//从信息行的下标6处开始提取变量数
@@ -174,6 +176,11 @@ CnfData* LoadCnfData(string fileName)//用邻接表来存放CNF文件中的数�
                 while(1)
                 {
                     end = buf.find(' ',start);
+                    while(end==start)//如果两个变量间有多个空格
+                    {
+                        start++;
+                        end = buf.find(' ',start);
+                    }
                     // cout<<stoi(buf.substr(start,end-start))<<endl;
                     if(stoi(buf.substr(start,end-start))!=0)//如果没有读到0，为每个变量创建新节点
                     {
@@ -316,19 +323,24 @@ int PickBranchVar(CnfData *data)//选择一个变量进行分裂
     //优先选择在2CNF中出现次数最多的变量进行分裂
     int maxVar = 1;//初始假设变量1是出现次数最多的，次数为1
     int max = 1;
+    bool exist2CNF = false;
     for(int i=1;i<=data->varNum;i++)
     {
         if(data->varIn2CNFFre[i]>max)
         {
+            exist2CNF = true;
             max = data->varIn2CNFFre[i];
             maxVar = i;
         }
     }
-    return maxVar;
-
-    // for(int i=1;i<=data->varNum;i++)//这里就简单地挑第一个未被赋值的变量
-    //     if(data->varArrP[i]==0)
-    //         return i;
+    if(exist2CNF)//如果存在2CNF，就按出现次数进行变量的选择
+        return maxVar;
+    else
+    {
+        for(int i=1;i<=data->varNum;i++)//否则就简单地挑第一个未被赋值的变量
+            if(data->varArrP[i]==0)
+                return i;
+    }
 }
 
 CnfData *AddUnitCla(CnfData *data,int var)//在一组子句中加入一个新的单子句
@@ -426,7 +438,6 @@ bool DPLLSolver(CnfData *data,int *solP)//基于DPLL的求解器
         if(SearchUnit(data,unitCla))//找单子句
         {
             UnitPropagate(data,unitCla);//进行单元传播
-
             if(SetIsEmpty(data))
             {
                 saveSol(data,solP);//说明到这里是可满足的，把当前变量的真假赋值保存下来
@@ -437,10 +448,9 @@ bool DPLLSolver(CnfData *data,int *solP)//基于DPLL的求解器
         }
         else//找不到就进行分裂
         {
-
             UpdateFre(data);//选择分支变量之前先更新2CNF频率
-
             int branchVar = PickBranchVar(data);
+            // cout<<"-----------------------选择的分支变量是:"<<branchVar<<"------------------------------"<<endl;
             return( DPLLSolver(AddUnitCla(data,branchVar),solP) || DPLLSolver(AddUnitCla(data,-branchVar),solP) );
         }
     }
@@ -452,15 +462,18 @@ int main()
     double dur;//测量DPLL的时间
     clock_t start,end;
 
-    CnfData *data = LoadCnfData(to_string(N)+"-Queen.cnf");//先读取CNF文件数据
+    CnfData *data = LoadCnfData("Sudoku.cnf");//先读取CNF文件数据
+
+    // CnfData *data = LoadCnfData(to_string(N)+"-Queen.cnf");//先读取CNF文件数据
     int *solP = new int[data->varNum+1];//用一个数组来存放变量的赋值
     solP[0] = data->varNum;//新数组首位同样不放变量数据，这里用来保存变量个数
-    ofstream ofs(to_string(N)+"-out.txt",ios::out);//把结果保存到文件中
+    ofstream ofs("out.txt",ios::out);//把结果保存到文件中
+    // ofstream ofs(to_string(N)+"-out.txt",ios::out);//把结果保存到文件中
     start = clock();
     if(DPLLSolver(data,solP))
     {
-        // cout<<"SAT"<<endl;
-        // printOneSol(solP);
+        cout<<"SAT"<<endl;
+        printOneSol(solP);
         ofs<<"SAT"<<endl;
         for(int i=1;i<=solP[0];i++)
         {
@@ -474,28 +487,30 @@ int main()
     }
     else
     {
-        // cout<<"UNSAT"<<endl;
+        cout<<"UNSAT"<<endl;
         ofs<<"UNSAT"<<endl;
     }
     end = clock();
     dur = (double)(end - start);
-    ofs.close();
-    Display(N);
+    ofs.close(); 
+    // Display(N);
     cout<<"DPLL耗时: "<<dur/CLOCKS_PER_SEC<<"s"<<endl;
-    // cout<<"p cnf "<<data->varNum<<" "<<data->claNum<<endl;
-    // for(int i=0;i<data->claNum;i++)
-    // {
-    //     Node *pNode = data->tP[i];//工作指针指向子句的头节点，准备逐个读取
-    //     if(pNode->val!=-1)//先检查该子句是不是已经逻辑删除
-    //     {
-    //         while(pNode->next!=NULL)
-    //         {
-    //             cout<<pNode->next->val<<" ";
-    //             pNode = pNode->next;
-    //         }
-    //         cout<<"0  varSize:"<<data->tP[i]->val <<endl;
-    //     }  
-    // }
+
+    //以下为测试cnf文件是否读到内存中
+/*     cout<<"p cnf "<<data->varNum<<" "<<data->claNum<<endl;
+    for(int i=0;i<data->claNum;i++)
+    {
+        Node *pNode = data->tP[i];//工作指针指向子句的头节点，准备逐个读取
+        if(pNode->val!=-1)//先检查该子句是不是已经逻辑删除
+        {
+            while(pNode->next!=NULL)
+            {
+                cout<<pNode->next->val<<" ";
+                pNode = pNode->next;
+            }
+            cout<<"0  varSize:"<<data->tP[i]->val <<endl;
+        }  
+    }  */
 
     system("pause");
     return 0;
